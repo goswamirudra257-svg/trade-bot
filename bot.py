@@ -5,6 +5,9 @@ from datetime import datetime
 TOKEN = "8563282168:AAEYircnD2OpqGBRZxrrbMtUiA1K9tz1XQo"
 CHAT_ID = "7015685218"
 
+EXCLUDE = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", 
+           "SENSEX", "BANKEX", "NIFTYNXT50"]
+
 def send_alert(msg):
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     try:
@@ -22,10 +25,12 @@ def get_spurt_stocks():
                   headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
         data = r.json()
         stocks = []
-        for item in data.get("data", [])[:4]:
+        for item in data.get("data", []):
             symbol = item.get("symbol") or item.get("underlying")
-            if symbol:
+            if symbol and symbol not in EXCLUDE:
                 stocks.append(symbol)
+            if len(stocks) == 4:
+                break
         return stocks
     except Exception as e:
         print(f"Spurt error: {e}")
@@ -57,7 +62,7 @@ def get_oi_signal(symbol):
             elif "PE" in opt_type or "Put" in opt_type:
                 put_oi_chg += oi_chg
 
-        print(f"{symbol}: Price={price_chg}, Call OI chg={call_oi_chg}, Put OI chg={put_oi_chg}")
+        print(f"{symbol}: Price={price_chg}, Call OI={call_oi_chg}, Put OI={put_oi_chg}")
 
         if price_chg > 0 and call_oi_chg > 0:
             return ("BUY CALL", "Price Gainer + Call OI Gainer = Long Buildup")
@@ -89,7 +94,7 @@ def run_scan(session):
         send_alert("NSE F&O data not available. Check manually.")
         return
 
-    send_alert(f"Top 4 F&O Spurt Stocks:\n" + "\n".join(stocks))
+    send_alert(f"Top 4 F&O Stocks (No Index):\n" + "\n".join(stocks))
 
     found = False
     for symbol in stocks:
@@ -109,7 +114,7 @@ Trailing SL: Every 1:1"""
             send_alert(msg)
 
     if not found:
-        send_alert("No OI signal found in top 4 F&O stocks.")
+        send_alert("No OI signal found in top 4 stocks.")
 
 now = datetime.now()
 hour = now.hour
