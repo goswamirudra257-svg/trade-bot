@@ -8,8 +8,8 @@ CHAT_ID = "7015685218"
 def send_alert(msg):
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     try:
-        requests.post(url, data={"chat_id": CHAT_ID, "text": msg})
-        print("Alert sent")
+        r = requests.post(url, data={"chat_id": CHAT_ID, "text": msg})
+        print(f"Alert sent: {r.status_code}")
     except Exception as e:
         print(f"Error: {e}")
 
@@ -29,7 +29,7 @@ def get_spurt_stocks():
         print(f"Spurt error: {e}")
         return []
 
-def check_signal(symbol):
+def get_oi_signal(symbol):
     try:
         s = requests.Session()
         s.get("https://www.nseindia.com",
@@ -37,40 +37,81 @@ def check_signal(symbol):
         r = s.get(f"https://www.nseindia.com/api/quote-derivative?symbol={symbol}",
                   headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
         data = r.json()
+        
         fut = None
         for item in data.get("stocks", []):
             if item.get("metadata", {}).get("instrumentType") == "Stock Futures":
                 fut = item
                 break
+        
         if not fut:
-            return
+            print(f"{symbol}: No futures data")
+            return None
+            
         price_chg = fut["metadata"].get("change", 0)
         oi_chg = fut["marketDeptOrderBook"]["tradeInfo"].get("changeinOpenInterest", 0)
+        
+        print(f"{symbol}: Price={price_chg}, OI={oi_chg}")
+        
         if price_chg > 0 and oi_chg > 0:
-            signal = "BUY CALL"
-            reason = "Long Buildup"
+            return ("BUY CALL", "Price Gainer + OI Gainer = Long Buildup")
         elif price_chg < 0 and oi_chg > 0:
-            signal = "BUY PUT"
-            reason = "Short Buildup"
+            return ("BUY PUT", "Price Loser + OI Gainer = Short Buildup")
         elif price_chg < 0 and oi_chg < 0:
-            signal = "BUY PUT"
-            reason = "Long Unwinding"
+            return ("BUY PUT", "Price Loser + OI Loser = Long Unwinding")
         else:
-            return
-        msg = f"TRADE ALERT\nStock: {symbol}\nSignal: {signal}\nReason: {reason}\nWait for 15 min ORB breakout!"
-        send_alert(msg)
+            return None
+            
     except Exception as e:
-        print(f"{symbol} error: {e}")
+        print(f"{symbol} OI error: {e}")
+        return None
 
 def run_scan(session):
-    send_alert(f"{session} Scan Starting...")
+    now = datetime.now().strftime("%H:%M")
+    
+    if "Morning" in session:
+        window = "Entry: 9:31 - 10:45 | 15 Min ORB"
+    elif "Afternoon" in session:
+        window = "Entry: 1:31 - 2:30 | 15 Min ORB"
+    else:
+        window = "Manual Test Mode"
+    
+    send_alert(f"SCAN START - {session}\nTime: {now}")
+    
     stocks = get_spurt_stocks()
     if not stocks:
-        send_alert("NSE data not available.")
+        send_alert("NSE data not available. Check manually.")
         return
-    send_alert(f"Top 4 Stocks: {', '.join(stocks)}")
-    for s in stocks:
-        check_signal(s)
+    
+    send_alert(f"Top 4 NSE Spurt Stocks:\n" + "\n".join(stocks))
+    
+    found = False
+    for symbol in stocks:
+        result = get_oi_signal(symbol)
         time.sleep(3)
+        
+        if result:
+            signal, reason = result
+            found = True
+            msg = f"""TRADE ALERT
+Stock: {symbol}
+Signal: {signal}
+Reason: {reason}
+{window}
+Target: 1:2
+Trailing SL: Every 1:1"""
+            send_alert(msg)
+    
+    if not found:
+        send_alert("No OI signal found in top 4 stocks.")
 
-run_scan("Manual Test")
+now = datetime.now()
+hour = now.hour
+minute = now.minute
+
+if hour == 9 and minute == 20:
+    run_scan("Morning 9:20")
+elif hour == 13 and minute == 20:
+    run_scan("Afternoon 1:20")
+else:
+    run_scan("Manual Test")
